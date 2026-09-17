@@ -155,6 +155,7 @@ struct DATALAYER_BATTERY_STATUS_TYPE {
    * Use with battery.info.number_of_cells to get valid data.
    */
   uint16_t cell_voltages_mV[MAX_AMOUNT_CELLS];
+  uint16_t cell_voltages_mV_215[MAX_AMOUNT_CELLS];
   /** All balancing resistors status inside the pack, either on(1) or off(0).
    * Use with battery.info.number_of_cells to get valid data.
    * Not available for all battery manufacturers.

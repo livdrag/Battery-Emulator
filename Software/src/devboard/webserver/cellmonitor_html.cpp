@@ -26,27 +26,33 @@ String cellmonitor_processor(const String& var) {
 
     if (battery3) {
       content +=
-          "#graph, #graph2, #graph3 {display: flex;align-items: flex-end;height: 200px;border: 1px solid "
+          "#graph, #graph2, #graph3, #graphCan {display: flex;align-items: flex-end;height: 200px;border: 1px solid "
           "#ccc;position: "
           "relative;}";
     } else if (battery2) {
       content +=
-          "#graph, #graph2 {display: flex;align-items: flex-end;height: 200px;border: 1px solid #ccc;position: "
+          "#graph, #graph2, #graphCan {display: flex;align-items: flex-end;height: 200px;border: 1px solid "
+          "#ccc;position: "
           "relative;}";
     } else {
       content +=
-          "#graph {display: flex;align-items: flex-end;height: 200px;border: 1px solid #ccc;position: relative;}";
+          "#graph, #graphCan {display: flex;align-items: flex-end;height: 200px;border: 1px solid #ccc;position: "
+          "relative;}";
     }
     content +=
         ".bar {margin: 0 0px;background-color: blue;display: inline-block;position: relative;cursor: pointer;border: "
         "1px solid white; /* Add this line */}";
+    content += ".bar-can {background-color: #2E8B57;}";  // Distinct color for the 0x215-sourced graph
 
     if (battery3) {
-      content += "#valueDisplay, #valueDisplay2, #valueDisplay3 {text-align: left;font-weight: bold;margin-top: 10px;}";
+      content +=
+          "#valueDisplay, #valueDisplay2, #valueDisplay3, #valueDisplayCan {text-align: left;font-weight: "
+          "bold;margin-top: 10px;}";
     } else if (battery2) {
-      content += "#valueDisplay, #valueDisplay2 {text-align: left;font-weight: bold;margin-top: 10px;}";
+      content +=
+          "#valueDisplay, #valueDisplay2, #valueDisplayCan {text-align: left;font-weight: bold;margin-top: 10px;}";
     } else {
-      content += "#valueDisplay {text-align: left;font-weight: bold;margin-top: 10px;}";
+      content += "#valueDisplay, #valueDisplayCan {text-align: left;font-weight: bold;margin-top: 10px;}";
     }
     content += "</style>";
 
@@ -57,9 +63,9 @@ String cellmonitor_processor(const String& var) {
 
     // Display max, min, and deviation voltage values
     content += "<div id='voltageValues' class='voltage-values'></div>";
-    // Display cells
+    // Display cells (each cell shows UDS mV / 0x215 mV)
     content += "<div id='cellContainer' class='container'></div>";
-    // Display bars
+    // Display bars (UDS-sourced, primary graph)
     content += "<div id='graph'></div>";
     // Display single hovered value
     content += "<div id='valueDisplay'>Value: ...</div>";
@@ -90,6 +96,12 @@ String cellmonitor_processor(const String& var) {
     content +=
         "<span style='color: white; background-color: red; font-weight: bold; padding: 2px 8px; border-radius: "
         "4px;'>Min/Max</span>";
+
+    // --- Second graph: higher-resolution cell voltages sourced from the 0x215 CAN broadcast ---
+    content += "<h4 style='margin-top:20px;margin-bottom:5px;'>0x215 cell voltages (higher resolution)</h4>";
+    content += "<div id='voltageValuesCan' class='voltage-values'></div>";
+    content += "<div id='graphCan'></div>";
+    content += "<div id='valueDisplayCan'>Value: ...</div>";
 
     // Close the block
     content += "</div>";
@@ -173,24 +185,51 @@ String cellmonitor_processor(const String& var) {
     content += "<button onclick='home()'>Back to main page</button>";
 
     content += "<script>";
-    // Populate cell data
-    content += "const data = [";
-    for (uint8_t i = 0u; i < datalayer.battery.info.number_of_cells; i++) {
-      if (datalayer.battery.status.cell_voltages_mV[i] == 0) {
-        continue;
-      }
-      content += String(datalayer.battery.status.cell_voltages_mV[i]) + ",";
-    }
-    content += "];";
 
-    content += "const balancing = [";
-    for (uint8_t i = 0u; i < datalayer.battery.info.number_of_cells; i++) {
-      if (datalayer.battery.status.cell_voltages_mV[i] == 0) {
-        continue;
+    // --- Primary battery: UDS-sourced values (drives the main graph + cell grid, unchanged filtering) ---
+    // --- and the parallel 0x215-sourced value for the SAME cell index, for the "uds/215" label ---
+    // `data`, `balancing`, and `dataCanPaired` are all built together below so their indices line up.
+    {
+      String dataArr = "[";
+      String balancingArr = "[";
+      String canPairedArr = "[";
+      for (uint8_t i = 0u; i < datalayer.battery.info.number_of_cells; i++) {
+        if (datalayer.battery.status.cell_voltages_mV[i] == 0) {
+          continue;
+        }
+        dataArr += String(datalayer.battery.status.cell_voltages_mV[i]) + ",";
+        balancingArr += datalayer.battery.status.cell_balancing_status[i] ? "true," : "false,";
+        // May legitimately be 0 if the 0x215 handler hasn't populated this cell index yet -
+        // the JS below renders that as "-" rather than a bogus 0 mV reading.
+        canPairedArr += String(datalayer.battery.status.cell_voltages_mV_215[i]) + ",";
       }
-      content += datalayer.battery.status.cell_balancing_status[i] ? "true," : "false,";
+      dataArr += "]";
+      balancingArr += "]";
+      canPairedArr += "]";
+
+      content += "const data = " + dataArr + ";";
+      content += "const balancing = " + balancingArr + ";";
+      content += "const dataCanPaired = " + canPairedArr + ";";
     }
-    content += "];";
+
+    // --- Second, independent series: 0x215-sourced values, filtered on THEIR OWN zero check,
+    //     used only to draw the second graph (may have a different populated set than UDS). ---
+    {
+      String canArr = "[";
+      String canBalancingArr = "[";
+      for (uint8_t i = 0u; i < datalayer.battery.info.number_of_cells; i++) {
+        if (datalayer.battery.status.cell_voltages_mV_215[i] == 0) {
+          continue;
+        }
+        canArr += String(datalayer.battery.status.cell_voltages_mV_215[i]) + ",";
+        canBalancingArr += datalayer.battery.status.cell_balancing_status[i] ? "true," : "false,";
+      }
+      canArr += "]";
+      canBalancingArr += "]";
+
+      content += "const dataCan = " + canArr + ";";
+      content += "const balancingCan = " + canBalancingArr + ";";
+    }
 
     content += "const min_mv = Math.min(...data) - 20;";
     content += "const max_mv = Math.max(...data) + 20;";
@@ -199,6 +238,13 @@ String cellmonitor_processor(const String& var) {
     content += "const graphContainer = document.getElementById('graph');";
     content += "const valueDisplay = document.getElementById('valueDisplay');";
     content += "const cellContainer = document.getElementById('cellContainer');";
+
+    content += "const min_mvCan = dataCan.length ? Math.min(...dataCan) - 20 : 0;";
+    content += "const max_mvCan = dataCan.length ? Math.max(...dataCan) + 20 : 0;";
+    content += "const min_indexCan = dataCan.indexOf(Math.min(...dataCan));";
+    content += "const max_indexCan = dataCan.indexOf(Math.max(...dataCan));";
+    content += "const graphContainerCan = document.getElementById('graphCan');";
+    content += "const valueDisplayCan = document.getElementById('valueDisplayCan');";
 
     content += "function home() { window.location.href = '/'; }";
 
@@ -211,6 +257,9 @@ String cellmonitor_processor(const String& var) {
     content +=
         "function checkMinMax(cell, bar, index) {if ((index == min_index) || (index == max_index)) "
         "{cell.style.borderColor = 'red';bar.style.borderColor = 'red';}}";
+    content +=
+        "function checkMinMaxCan(bar, index) {if ((index == min_indexCan) || (index == max_indexCan)) "
+        "{bar.style.borderColor = 'red';}}";
 
     // Bar function. Basically get the mV, scale the height and add a bar div to its container
     content +=
@@ -250,14 +299,50 @@ String cellmonitor_processor(const String& var) {
         "});"
         "}";
 
-    // Cell population function. For each value, add a cell block with its value
+    // Bar function for the 0x215-sourced (more accurate) graph
+    content +=
+        "function createBarsCan(dataCan) {"
+        "if (dataCan.length === 0) { return; }"
+        "dataCan.forEach((mV, index) => {"
+        "const bar = document.createElement('div');"
+        "const mV_limited = map(mV, min_mvCan, max_mvCan, 20, 200);"
+        "bar.className = 'bar bar-can';"
+        "bar.id = `barCanIndex${index}`;"
+        "bar.style.height = `${mV_limited}px`;"
+        "bar.style.width = `${750/dataCan.length}px`;"
+        "if (balancingCan[index]) {"
+        "  bar.style.backgroundColor = '#00FFFF';"
+        "  bar.style.borderColor = '#00FFFF';"
+        "} else {"
+        "  bar.style.borderColor = 'white';"
+        "}"
+
+        "checkMinMaxCan(bar, index);"
+
+        "bar.addEventListener('mouseenter', () => {"
+        "    valueDisplayCan.textContent = `Value: ${mV}` + (balancingCan[index] ? ' (balancing)' : '');"
+        "    bar.style.backgroundColor = balancingCan[index] ? '#80FFFF' : '#7BC79E';"
+        "});"
+
+        "bar.addEventListener('mouseleave', () => {"
+        "valueDisplayCan.textContent = 'Value: ...';"
+        "bar.style.backgroundColor = balancingCan[index] ? '#00FFFF' : '#2E8B57';"
+        "});"
+
+        "graphContainerCan.appendChild(bar);"
+        "});"
+        "}";
+
+    // Cell population function. For each value, add a cell block showing UDS mV / 0x215 mV
     content +=
         "function createCells(data) {"
         "data.forEach((mV, index) => {"
         "const cell = document.createElement('div');"
         "cell.className = 'cell';"
         "cell.id = `cellIndex${index}`;"
-        "let cellContent = `Cell ${index + 1}<br>${mV} mV`;"
+        "const mVCan = dataCanPaired[index];"
+        "const canText = (mVCan === undefined || mVCan === 0) ? '-' : mVCan;"
+        "let cellContent = `Cell ${index + 1}<br>${mV} / ${canText} mV`;"
         "if (mV < 3000) {"
         "  cellContent = `<span class='low-voltage'>${cellContent}</span>`;"
         "}"
@@ -294,6 +379,20 @@ String cellmonitor_processor(const String& var) {
       content += "${cell_dev} mV`}";
     }
 
+    content +=
+        "function updateVoltageValuesCan(dataCan) {"
+        "const voltValCan = document.getElementById('voltageValuesCan');"
+        "if (dataCan.length === 0) {"
+        "  voltValCan.textContent = '0x215 cell voltages not yet received';"
+        "  return;"
+        "}"
+        "const min_mv = Math.min(...dataCan);"
+        "const max_mv = Math.max(...dataCan);"
+        "const cell_dev = max_mv - min_mv;"
+        "voltValCan.innerHTML = `Max Voltage : ${max_mv} mV<br>Min Voltage: ${min_mv} mV<br>Voltage Deviation: "
+        "${cell_dev} mV`;"
+        "}";
+
     // If we have values, do the thing. Otherwise, display friendly message and wait
     content += "if (data.length != 0) {";
     content += "createCells(data);";
@@ -310,6 +409,9 @@ String cellmonitor_processor(const String& var) {
           "read';";
     }
     content += "}";
+
+    content += "createBarsCan(dataCan);";
+    content += "updateVoltageValuesCan(dataCan);";
 
     if (battery2) {
       // Populate cell data

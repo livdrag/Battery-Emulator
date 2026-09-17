@@ -78,6 +78,50 @@ void KiaEGmpBattery::set_cell_voltages(uint8_t reading, uint8_t cellNumber) {
   }
 }
 
+// Sets a cell voltage that's already expressed in mV (e.g. from 0x215),
+// as opposed to set_cell_voltages() which takes an 8-bit reading and applies *20.
+void KiaEGmpBattery::set_cell_voltage_mv(uint16_t voltage_mV, uint8_t cellNumber) {
+  if (cellNumber >= MAX_AMOUNT_CELLS) {
+    return;
+  }
+  if (voltage_mV > 2600) {  // Same sanity floor used for UDS-derived cell voltages
+    datalayer.battery.status.cell_voltages_mV_215[cellNumber] = voltage_mV;
+  }
+}
+
+void KiaEGmpBattery::handle_0x215_cell_voltages(const CAN_frame& rx_frame) {
+  if (rx_frame.DLC < 7) {
+    return;
+  }
+  const uint8_t mux = rx_frame.data.u8[3];
+  if (mux != 0x01) {
+    return;  // mux 0x02 carries a different, non-voltage signal - still unconfirmed, excluded
+  }
+
+  // byte[4] is the 1-based starting cell number for THIS frame's batch of 13 cells.
+  // It rolls forward by 13 each frame as the BMS cycles through the whole pack -
+  // do not hardcode this to 0.
+  const uint8_t start_cell_1based = rx_frame.data.u8[4];
+  if (start_cell_1based == 0) {
+    return;  // defensive: avoid underflow below
+  }
+  const uint8_t base_cell = start_cell_1based - 1;  // convert to 0-based array index
+
+  const uint8_t max_values = (rx_frame.DLC - 5) / 2;
+  for (uint8_t i = 0; i < max_values; i++) {
+    const uint8_t offset = 5 + (i * 2);
+    if (offset + 1 >= rx_frame.DLC) {
+      break;
+    }
+    const uint16_t mv = (static_cast<uint16_t>(rx_frame.data.u8[offset + 1]) << 8) | rx_frame.data.u8[offset];
+    const uint16_t cellNumber = base_cell + i;
+    if (cellNumber >= MAX_AMOUNT_CELLS) {
+      break;
+    }
+    set_cell_voltage_mv(mv, static_cast<uint8_t>(cellNumber));
+  }
+}
+
 void KiaEGmpBattery::process_cell_voltage_group(const uint8_t* data, uint8_t baseCell) {
   for (int i = 0; i < 32; i++) {
     set_cell_voltages(data[4 + i], baseCell + i);
@@ -384,6 +428,7 @@ void KiaEGmpBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       break;
     case 0x215:
       datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      handle_0x215_cell_voltages(rx_frame);
       break;
     case 0x21A:
       datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;

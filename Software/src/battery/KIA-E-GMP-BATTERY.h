@@ -44,6 +44,8 @@ class KiaEGmpBattery : public UdsCanBattery {
   void set_cell_voltages(uint8_t reading, uint8_t cellNumber);
   void process_cell_voltage_group(const uint8_t* data, uint8_t baseCell);
   void set_voltage_minmax_limits();
+  void set_cell_voltage_mv(uint16_t voltage_mV, uint8_t cellNumber);
+  void handle_0x215_cell_voltages(const CAN_frame& rx_frame);
 
   static const int MAX_PACK_VOLTAGE_DV = 8064;  //5000 = 500.0V
   static const int MIN_PACK_VOLTAGE_DV = 4320;
