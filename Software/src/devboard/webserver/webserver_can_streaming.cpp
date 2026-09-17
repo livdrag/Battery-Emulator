@@ -51,9 +51,11 @@ static void can_dump_close_current() {
 // expensive, so we use a larger ring buffer to store several CAN frames to then
 // be sent in larger chunks where possible.
 //
-// This setting can be adjusted as available RAM permits - 16384 gives great
-// performance in testing, 8192 gives occasional overruns.
-static constexpr size_t CAN_DUMP_RING_SIZE = 8192;
+// CAN-FD traffic produces short bursts that can exceed the TCP send window.
+// Keep enough headroom for those bursts; Stark and the other non-small-flash
+// targets have sufficient internal RAM for this allocation while it only
+// exists during an active dump.
+static constexpr size_t CAN_DUMP_RING_SIZE = 32768;
 
 // Always keep this many bytes free at the tail end of the ring.  Each byte is
 // one '\n' overflow-indicator, so this guarantees the drain task can still
@@ -169,7 +171,11 @@ static bool can_dump_ring_drain(AsyncClient* client) {
       n = space;
     size_t written = client->write(reinterpret_cast<const char*>(&can_dump_ring[i]), n, ASYNC_WRITE_FLAG_COPY);
     if (written == 0) {
-      return false;  // Socket broken or AsyncTCP can no longer accept data.
+      // AsyncTCP can temporarily return zero even after space() reported room
+      // (for example while ACK processing changes the send window). Preserve
+      // the queued data and retry on the next drain tick. A real disconnect is
+      // handled by the registered onDisconnect callback.
+      break;
     }
     head += written;
     can_dump_ring_head.store(head, std::memory_order_release);

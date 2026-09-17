@@ -36,6 +36,7 @@ class KiaEGmpBattery : public UdsCanBattery {
   uint8_t calculateCRC(CAN_frame rx_frame, uint8_t length, uint8_t initial_value);
   uint16_t calculate_transmit_checksum(const CAN_frame& frame);
   uint16_t transmit_checksum_xor(uint16_t can_id) const;
+  void apply_dynamic_inverter_voltage(CAN_frame& frame) const;
   static uint8_t find_transmit_counter_index(uint16_t can_id);
   bool has_transmit_counter(uint16_t can_id) const;
   void transmit_startup_message(uint8_t message_index);
@@ -67,6 +68,7 @@ class KiaEGmpBattery : public UdsCanBattery {
   uint16_t CellVoltMax_mV = 3700;
   uint16_t CellVoltMin_mV = 3700;
   uint16_t batteryVoltage = 6700;
+  bool batteryVoltageValid = false;
   int16_t leadAcidBatteryVoltage = 120;
   int16_t batteryAmps = 0;
   int16_t temperatureMax = 20;

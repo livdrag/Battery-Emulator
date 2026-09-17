@@ -165,6 +165,21 @@ uint16_t KiaEGmpBattery::transmit_checksum_xor(uint16_t can_id) const {
   }
 }
 
+void KiaEGmpBattery::apply_dynamic_inverter_voltage(CAN_frame& frame) const {
+  if (!batteryVoltageValid || (frame.ID != 0x10A && frame.ID != 0x120)) {
+    return;
+  }
+
+  // Bytes 16-17 in the captured VCMS frames contain the inverter/DC-link
+  // voltage in whole volts, little endian (0x02C9 = 713 V). The original
+  // capture therefore becomes implausible as the pack voltage changes. Until
+  // a dedicated inverter-side voltage is available, use the fresh pack
+  // voltage reported by the BMS. Round from decivolts to the nearest volt.
+  const uint16_t voltage_V = static_cast<uint16_t>((batteryVoltage + 5u) / 10u);
+  frame.data.u8[16] = static_cast<uint8_t>(voltage_V);
+  frame.data.u8[17] = static_cast<uint8_t>(voltage_V >> 8);
+}
+
 void KiaEGmpBattery::request_startup_sequence() {
   startupSequenceRequested = true;
   startupSequenceComplete = false;
@@ -186,6 +201,7 @@ void KiaEGmpBattery::transmit_startup_message(uint8_t message_index) {
     last_transmit_counter_valid[counter_index] = true;
     last_transmit_counter[counter_index] = frame.data.u8[2];
   }
+  apply_dynamic_inverter_voltage(frame);
   uint16_t checksum = calculate_transmit_checksum(frame);
   frame.data.u8[0] = static_cast<uint8_t>(checksum);
   frame.data.u8[1] = static_cast<uint8_t>(checksum >> 8);
@@ -236,6 +252,7 @@ void KiaEGmpBattery::transmit_message(uint16_t can_id, uint32_t message_count) {
     last_transmit_counter[counter_index] = next_counter;
     frame.data.u8[2] = next_counter;
   }
+  apply_dynamic_inverter_voltage(frame);
   uint16_t checksum = calculate_transmit_checksum(frame);
   frame.data.u8[0] = static_cast<uint8_t>(checksum);
   frame.data.u8[1] = static_cast<uint8_t>(checksum >> 8);
@@ -401,6 +418,7 @@ uint16_t KiaEGmpBattery::handle_pid(uint16_t pid, uint32_t value, const uint8_t*
       //Frame 22 (00 3c 1a cd 17 16 16) data10-16
       batteryAmps = (data[10] << 8) + data[11];
       batteryVoltage = (data[12] << 8) + data[13];
+      batteryVoltageValid = true;
       temperatureMax = data[14];
       temperatureMin = data[15];
       //temperatureAvg = data[16]; Not required
