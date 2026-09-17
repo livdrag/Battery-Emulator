@@ -109,7 +109,7 @@ jobs:
         path = Path.home() / ".platformio/platforms/espressif32/platform.json"
         data = json.loads(path.read_text())
         data["packages"]["tool-scons"]["package-version"] = "4.41101.0"
-        path.write_text(json.dumps(data, indent=2) + "\\n")
+        path.write_text(json.dumps(data, indent=2) + "\n")
         print("Pinned PIOArduino tool-scons package-version to 4.41101.0")
         PY
 
