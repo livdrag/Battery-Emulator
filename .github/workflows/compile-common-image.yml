@@ -113,6 +113,8 @@ jobs:
     # CI-only compatibility workaround. It does not change firmware sources.
     - name: Work around PlatformIO 6.2 SCons package mismatch
       run: |
+        # Ensure the PIOArduino platform exists even when this fork has no cache yet.
+        pio pkg install -e ${{ matrix.pio_env }}
         python - <<'PY'
         import json
         from pathlib import Path
