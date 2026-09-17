@@ -98,20 +98,9 @@ jobs:
       run: |
         sed -i "/if line\.split.*expected_hash:/i \                print('Hash check, sdkconfig has:', line.split(\"__\")[1].strip(), 'was expecting:', expected_hash, 'data is:', repr(custom_options.strip() + mcu))" ~/.platformio/platforms/espressif32/builder/frameworks/arduino.py || echo "sed failed"
 
-    # CI-only compatibility workaround; firmware sources are untouched.
-    - name: Work around PlatformIO 6.2 SCons package mismatch
-      run: |
-        pio pkg install -e ${{ matrix.pio_env }}
-        python - <<'PY'
-        import json
-        from pathlib import Path
-
-        path = Path.home() / ".platformio/platforms/espressif32/platform.json"
-        data = json.loads(path.read_text())
-        data["packages"]["tool-scons"]["package-version"] = "4.41101.0"
-        path.write_text(json.dumps(data, indent=2) + "\n")
-        print("Pinned PIOArduino tool-scons package-version to 4.41101.0")
-        PY
+    # CI-only: install the platform before the two-stage hybrid build.
+    - name: Preinstall PIOArduino platform
+      run: pio pkg install -e ${{ matrix.pio_env }}
 
     - name: Build image for ${{ matrix.board_name }}
       shell: bash
